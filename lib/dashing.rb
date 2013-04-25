@@ -113,8 +113,8 @@ end
 Dir[File.join(settings.root, 'lib', '**', '*.rb')].each {|file| require file }
 {}.to_json # Forces your json codec to initialize (in the event that it is lazily loaded). Does this before job threads start.
 
-class Rufus::Scheduler::PassengerWrapper(root)
-  def initialize
+class Rufus::Scheduler::PassengerWrapper
+  def initialize(root)
     @root = root
     @tasks = []
 
