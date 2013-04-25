@@ -113,12 +113,13 @@ end
 Dir[File.join(settings.root, 'lib', '**', '*.rb')].each {|file| require file }
 {}.to_json # Forces your json codec to initialize (in the event that it is lazily loaded). Does this before job threads start.
 
-class Rufus::Scheduler::PassengerWrapper
+class Rufus::Scheduler::PassengerWrapper(root)
   def initialize
+    @root = root
     @tasks = []
 
-    pid_file = File.join(settings.root, 'tmp','pids','scheduler')
-    logger = Logger.new(File.join(settings.root, 'log','scheduler'))
+    pid_file = File.join(@root, 'tmp','pids','scheduler')
+    logger = Logger.new(File.join(@root, 'log','scheduler'))
 
     if File.exist?(pid_file)
       pid = File.open(pid_file, "r") {|f| pid = f.read.to_i}
@@ -150,7 +151,7 @@ class Rufus::Scheduler::PassengerWrapper
   end
 
   def schedule(*args,&block)
-    logger = Logger.new(File.join(settings.root, 'log','scheduler'))
+    logger = Logger.new(File.join(@root, 'log','scheduler'))
     logger.debug "Adding Job #{@tasks.length + 1}"
     @tasks << {:args => args, :block => block}
     @scheduler.every *args, &block if @scheduler
@@ -159,7 +160,7 @@ class Rufus::Scheduler::PassengerWrapper
 
   def start_scheduler
     return if @scheduler
-    logger = Logger.new(File.join(settings.root, 'log','scheduler'))
+    logger = Logger.new(File.join(@root, 'log','scheduler'))
     logger.debug "Launching #{@tasks.length + 1} Jobs"
     @scheduler = Rufus::Scheduler.start_new
     @tasks.each do |task|
@@ -171,7 +172,7 @@ end
 unless defined?(PhusionPassenger)
   SCHEDULER = Rufus::Scheduler.start_new
 else
-  SCHEDULER = Rufus::Scheduler::PassengerWrapper.new
+  SCHEDULER = Rufus::Scheduler::PassengerWrapper.new(settings.root)
 end
 
 job_path = ENV["JOB_PATH"] || 'jobs'
