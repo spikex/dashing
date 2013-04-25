@@ -6,8 +6,6 @@ require 'coffee-script'
 require 'sass'
 require 'json'
 
-SCHEDULER = Rufus::Scheduler.start_new
-
 set :root, Dir.pwd
 
 set :sprockets,     Sprockets::Environment.new(settings.root)
@@ -114,6 +112,67 @@ end
 
 Dir[File.join(settings.root, 'lib', '**', '*.rb')].each {|file| require file }
 {}.to_json # Forces your json codec to initialize (in the event that it is lazily loaded). Does this before job threads start.
+
+class Rufus::Scheduler::PassengerWrapper
+  def initialize
+    @tasks = []
+
+    pid_file = File.join(settings.root, 'tmp','pids','scheduler')
+    logger = Logger.new(File.join(settings.root, 'log','scheduler'))
+
+    if File.exist?(pid_file)
+      pid = File.open(pid_file, "r") {|f| pid = f.read.to_i}
+      begin
+        Process.getpgid( pid )
+      rescue Errno::ESRCH
+        logger.debug "#{Process.pid} REMOVING STALE LOCK FOR #{ pid }"
+        File.delete(pid_file)
+      end
+    end
+
+    PhusionPassenger.on_event(:starting_worker_process) do |forked|
+      if forked && !File.exist?(pid_file)
+        File.open(pid_file, 'w'){|f| f.puts Process.pid}
+        start_scheduler
+        logger.debug "SCHEDULER START ON PROCESS #{Process.pid}"
+      end
+    end
+
+    PhusionPassenger.on_event(:stopping_worker_process) do
+      if File.exist? pid_file
+        if File.open(pid_file, "r") {|f| pid = f.read.to_i} == Process.pid
+          File.delete(pid_file)
+          logger.debug "SCHEDULER STOP ON PROCESS #{Process.pid}"
+          @scheduler = nil
+        end
+      end
+    end
+  end
+
+  def schedule(*args,&block)
+    logger = Logger.new(File.join(settings.root, 'log','scheduler'))
+    logger.debug "Adding Job #{@tasks.length + 1}"
+    @tasks << {:args => args, :block => block}
+    @scheduler.every *args, &block if @scheduler
+  end
+  alias_method :every, :schedule
+
+  def start_scheduler
+    return if @scheduler
+    logger = Logger.new(File.join(settings.root, 'log','scheduler'))
+    logger.debug "Launching #{@tasks.length + 1} Jobs"
+    @scheduler = Rufus::Scheduler.start_new
+    @tasks.each do |task|
+      @scheduler.every *task[:args], &task[:block]
+    end
+  end
+end
+
+unless defined?(PhusionPassenger)
+  SCHEDULER = Rufus::Scheduler.start_new
+else
+  SCHEDULER = Rufus::Scheduler::PassengerWrapper.new
+end
 
 job_path = ENV["JOB_PATH"] || 'jobs'
 files = Dir[File.join(settings.root, job_path, '/*.rb')]
